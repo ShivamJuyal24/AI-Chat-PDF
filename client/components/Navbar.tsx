@@ -16,10 +16,10 @@ export default function Navbar() {
           {/* Left side - Logo and Brand */}
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-lg">M</span>
+              <span className="text-white font-bold text-lg">AI</span>
             </div>
             <h1 className="text-xl font-semibold text-slate-900 tracking-tight">
-              MyApp
+              AskPdf
             </h1>
           </div>
 
