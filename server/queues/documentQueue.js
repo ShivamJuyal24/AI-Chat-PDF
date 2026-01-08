@@ -1,6 +1,6 @@
 import { Queue } from 'bullmq';
 import { redis } from '../config/redis.js';
 
-export const documentQueue = new Queue('documents', {
+export const documentQueue = new Queue('document-queue', {
   connection: redis,
 });
