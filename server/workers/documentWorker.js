@@ -1,59 +1,87 @@
 import { Worker } from 'bullmq';
 import { redis } from '../config/redis.js';
 import fs from 'fs/promises';
-import { PDFParse } from 'pdf-parse';
+import pdfParse from 'pdf-parse'; // ✅ Fixed: pdf-parse exports a default function, not a named class
 import { chunkText } from '../utils/chunkText.js';
 import { db } from '../config/db.js';
-import { addEmbeddingToChunks } from '../utils/embedding.js'; // ✅ Gemini version
+import { addEmbeddingToChunks } from '../utils/embedding.js';
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+const log = (jobId, msg) => console.log(`[Job ${jobId}] ${msg}`);
+const logErr = (jobId, msg, err) => console.error(`[Job ${jobId}] ❌ ${msg}`, err.message);
+
+/**
+ * Bulk insert all chunks in a single query instead of N round-trips.
+ * Falls back silently if chunks array is empty.
+ */
+const bulkInsertChunks = async (documentId, chunks) => {
+  if (!chunks.length) return;
+
+  const values = chunks.flatMap((chunk, i) => [documentId, i, chunk]);
+  const placeholders = chunks
+    .map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`)
+    .join(', ');
+
+  await db.query(
+    `INSERT INTO document_chunks (document_id, chunk_index, content) VALUES ${placeholders}`,
+    values
+  );
+};
+
+// ─── Worker ─────────────────────────────────────────────────────────────────
 
 export const documentWorker = new Worker(
   'document-queue',
   async (job) => {
     const { filePath, documentId } = job.data;
+    log(job.id, `Started → documentId: ${documentId}`);
 
-    console.log(`📄 [Job ${job.id}] Started processing documentId: ${documentId}`);
+    // Step 1: Read + parse PDF
+    const fileBuffer = await fs.readFile(filePath);
+    const pdfData = await pdfParse(fileBuffer); // ✅ No need to wrap in Uint8Array
+    const chunks = chunkText(pdfData.text);
 
-    try {
-      const fileBuffer = await fs.readFile(filePath);
-      const uint8Array = new Uint8Array(fileBuffer);
-      const parser = new PDFParse(uint8Array);
-      const pdfData = await parser.getText();
+    log(job.id, `Extracted ${pdfData.text.length} chars → ${chunks.length} chunks`);
+    await job.updateProgress(33);
 
-      const chunks = chunkText(pdfData.text);
+    // Step 2: Bulk insert (was: N sequential awaits in a for-loop)
+    await bulkInsertChunks(documentId, chunks);
+    log(job.id, `Stored ${chunks.length} chunks`);
+    await job.updateProgress(66);
 
-      console.log(`🧠 [Job ${job.id}] Extracted text length: ${pdfData.text.length}`);
+    // Step 3: Embeddings
+    log(job.id, `Generating embeddings...`);
+    await addEmbeddingToChunks(documentId);
+    await job.updateProgress(100);
 
-      // 🔹 INSERT CHUNKS
-      for (let i = 0; i < chunks.length; i++) {
-        await db.query(
-          `INSERT INTO document_chunks (document_id, chunk_index, content)
-           VALUES ($1, $2, $3)`,
-          [documentId, i, chunks[i]]
-        );
-      }
-
-      console.log(`📦 [Job ${job.id}] Stored ${chunks.length} chunks in DB`);
-
-      // 🔹 AUTOMATIC EMBEDDINGS (Phase 5) with Gemini
-      console.log(`🧠 [Job ${job.id}] Generating embeddings for document ${documentId}...`);
-      await addEmbeddingToChunks(documentId);
-      console.log(`✅ [Job ${job.id}] Embeddings generated for document ${documentId}`);
-
-      return { chunksInserted: chunks.length };
-    } catch (err) {
-      console.error(`❌ [Job ${job.id}] Failed processing documentId: ${documentId}`, err);
-      throw err;
-    }
+    return { chunksInserted: chunks.length };
   },
   {
     connection: redis,
+    concurrency: 4,              // ✅ Process up to 4 jobs in parallel
+    removeOnComplete: { count: 100 }, // ✅ Auto-clean completed jobs
+    removeOnFail: { count: 50 },      // ✅ Keep last 50 failed for debugging
   }
 );
 
+// ─── Events ─────────────────────────────────────────────────────────────────
+
 documentWorker.on('completed', (job) => {
-  console.log(`✅ [Job ${job.id}] Completed | Chunks inserted: ${job.returnvalue?.chunksInserted}`);
+  log(job.id, `✅ Completed | Chunks inserted: ${job.returnvalue?.chunksInserted}`);
 });
 
 documentWorker.on('failed', (job, err) => {
-  console.error(`❌ [Job ${job?.id}] Failed`, err);
+  logErr(job?.id ?? 'unknown', 'Job failed', err);
 });
+
+// ─── Graceful Shutdown ───────────────────────────────────────────────────────
+
+const shutdown = async (signal) => {
+  console.log(`\n${signal} received — draining worker...`);
+  await documentWorker.close(); // ✅ Waits for active jobs to finish
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
