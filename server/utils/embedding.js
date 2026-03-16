@@ -27,7 +27,7 @@ export async function addEmbeddingToChunks(documentId) {
         [vectorString, chunk.id]
       );
 
-      console.log(`✅ Chunk ${chunk.id} embedding stored`);
+      console.log(`✅ Chunk ${chunk.id} embedding stored successfull.`);
     } catch (err) {
       console.error(`❌ Failed for chunk ${chunk.id}:`, err.message);
     }
