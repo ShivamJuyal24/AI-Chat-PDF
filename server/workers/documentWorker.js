@@ -68,7 +68,7 @@ export const documentWorker = new Worker(
 // ─── Events ─────────────────────────────────────────────────────────────────
 
 documentWorker.on('completed', (job) => {
-  log(job.id, `✅ Completed | Chunks inserted: ${job.returnvalue?.chunksInserted}`);
+  log(job.id, `✅ Complete | Chunks inserted: ${job.returnvalue?.chunksInserted}`);
 });
 
 documentWorker.on('failed', (job, err) => {
