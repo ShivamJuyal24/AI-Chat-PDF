@@ -45,7 +45,7 @@ export async function uploadFile(file: File, token?: string) {
   return response.json();
 }
 
-export async function sendMessage(message: string, fileId?: string, token?: string) {
+export async function sendMessage(message: string, documentId?: string, token?: string) {
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
   };
@@ -57,7 +57,7 @@ export async function sendMessage(message: string, fileId?: string, token?: stri
   const response = await fetch(`${API_URL}/chat`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ message, fileId }),
+    body: JSON.stringify({ message, documentId }),
   });
 
   if (!response.ok) {

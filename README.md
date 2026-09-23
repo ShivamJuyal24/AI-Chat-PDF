@@ -1,94 +1,245 @@
-# 📄 AI PDF Chat Application (Backend – Phase 1 to Phase 5)
+# 📄 AI PDF Chat Application (AskPdf)
 
-A production-grade backend for an AI-powered PDF chat application, designed with real-world scalability and clean architecture in mind. This project currently implements secure authentication, PDF ingestion, background processing, text chunking, and vector embeddings stored using pgvector.
+A production-oriented full-stack application for asking questions about PDF documents. AskPdf combines Clerk authentication, Supabase Storage, PostgreSQL with pgvector, Redis-backed background jobs, Gemini embeddings, and Groq/Gemini chat generation in a clean RAG architecture.
+
+The application has a public landing page, authenticated document-chat workspace, asynchronous PDF processing, semantic retrieval, grounded answers, and a Groq-first chat fallback to Gemini.
 
 ## 🚀 Project Status
 
-- ✅ **Phase 1** – Core Backend & Authentication
+- ✅ **Phase 1** – Core API & Authentication
 - ✅ **Phase 2** – Background Queue (BullMQ + Redis)
 - ✅ **Phase 3** – PDF Parsing & Text Chunking
-- ✅ **Phase 4** – Database Storage (Documents + Chunks)
-- ✅ **Phase 5** – Vector Embeddings with pgvector (Gemini)
-- ⏳ **Phase 6** – Chat with PDF (Upcoming)
+- ✅ **Phase 4** – Database & Storage Integration
+- ✅ **Phase 5** – Vector Embeddings with pgvector
+- ✅ **Phase 6** – Chat with PDF and Semantic Retrieval
+- ✅ **Phase 7** – Landing Page, Protected Workspace & Processing Status UX
+- ⏳ **Phase 8** – Production Deployment, Monitoring & Automated Tests
 
 ## 🧠 What This Project Demonstrates
 
-- Secure JWT-based authentication using Clerk
-- File upload handling with Multer
-- Asynchronous background job processing using BullMQ + Redis
-- PDF text extraction and intelligent chunking
-- Vector embeddings generation using Google Gemini
-- Semantic search-ready storage using PostgreSQL + pgvector
-- Clean separation between API, queue, worker, and utility layers
-- Industry-style backend architecture for RAG systems
+- Public product landing page with Clerk sign-in and sign-up flows
+- Protected document-chat workspace for authenticated users
+- JWT-based authentication using Clerk on both client and server
+- PDF upload validation using Multer and PDF magic bytes
+- Private document storage using Supabase Storage
+- Asynchronous document processing using BullMQ and Redis
+- PDF text extraction and sentence-aware chunking
+- 3072-dimensional Gemini embeddings stored with pgvector
+- Exact vector similarity search for high-dimensional embeddings
+- Grounded RAG answers with numbered context citations
+- Groq-first chat generation with Gemini fallback
+- Per-user document and chat isolation
+- Processing status polling in the frontend
+- Markdown-rendered assistant responses
+- Structured API, worker, service, queue, and utility layers
+
+## 🏗️ Architecture
+
+```
+Public visitor
+   │
+   ├── Landing page (/)
+   ├── Clerk sign-in (/sign-in)
+   └── Clerk sign-up (/sign-up)
+            │
+            ▼
+Authenticated user
+   │
+   └── Document workspace (/chat)
+          │
+          ├── Upload PDF
+          │      │
+          │      ├── Express API
+          │      ├── Clerk authentication
+          │      ├── Multer validation
+          │      ├── Supabase Storage
+          │      ├── PostgreSQL document record
+          │      └── BullMQ document job
+          │
+          └── Ask question
+                 │
+                 ├── Gemini question embedding
+                 ├── PostgreSQL exact vector search
+                 ├── Top-K document chunks
+                 ├── Groq chat generation
+                 ├── Gemini fallback if Groq fails
+                 └── Persisted chat history
+
+Upstash Redis ──► BullMQ ──► Document Worker
+                                  │
+                                  ├── Download PDF
+                                  ├── Extract text
+                                  ├── Chunk text
+                                  ├── Generate embeddings
+                                  └── Store vectors
+```
 
 ## 🏗️ Tech Stack
 
-### Backend
-- Node.js
-- Express.js
-- PostgreSQL
-- pgvector
-- Redis
+### Client
+
+- Next.js 16 with App Router and Turbopack
+- React 19
+- TypeScript
+- Tailwind CSS
+- Clerk Next.js SDK
+- React Markdown
+- Lucide React
+
+### Server
+
+- Node.js 20+
+- Express 5
+- Prisma
+- PostgreSQL with pgvector
+- Multer
+- Supabase Storage
+- Upstash Redis
 - BullMQ
 
 ### Authentication
-- Clerk (JWT-based authentication)
 
-### File Handling
-- Multer (local temporary storage)
+- Clerk session authentication
+- Clerk middleware on the Next.js client
+- Clerk request authentication on the Express API
+- Per-user document, chunk, and chat ownership checks
 
-### AI / Embeddings
-- Google Gemini (`text-embedding-004`)
+### AI
+
+- Gemini Embedding 2 for document and question embeddings
+- Groq `llama-3.3-70b-versatile` as the primary chat model
+- Gemini chat model as the fallback provider
+
+## 📁 Project Structure
+
+```
+client/
+├── app/
+│   ├── chat/page.tsx              # Protected document workspace route
+│   ├── sign-in/page.tsx           # Clerk sign-in route
+│   ├── sign-up/page.tsx           # Clerk sign-up route
+│   ├── page.tsx                   # Public landing route
+│   ├── layout.tsx                 # Clerk provider and global layout
+│   └── globals.css
+├── components/
+│   ├── LandingPage.tsx            # Public product page
+│   ├── Navbar.tsx                 # Navigation and auth controls
+│   └── SplitPage.tsx              # Upload and chat workspace
+├── lib/api.ts                     # Shared API helpers
+└── proxy.ts                       # Clerk route protection
+
+server/
+├── index.js                       # Express API process
+├── worker.js                      # BullMQ worker process
+└── src/
+    ├── config/                    # Environment, Clerk, Prisma, Redis, Supabase
+    ├── controllers/               # Upload, document, and chat handlers
+    ├── middleware/                # Auth, upload, rate limit, and errors
+    ├── queues/                   # BullMQ producers
+    ├── routes/                   # API route definitions
+    ├── services/                 # Gemini, Groq, and storage integrations
+    ├── utils/                    # Logging, errors, and chunking
+    ├── workers/                  # PDF processing worker
+    └── prisma/                   # Schema and migrations
+
+docker/
+└── docker-compose.yml             # Local PostgreSQL development service
+```
 
 ## 🔐 Authentication Flow (Clerk)
 
-1. User authenticates on the frontend using Clerk
-2. Frontend sends JWT in the `Authorization` header
-3. Backend verifies the token using Clerk middleware
-4. Only authenticated users can upload PDFs
+1. A visitor opens the public landing page.
+2. Clerk handles sign-in or sign-up.
+3. Authenticated users are redirected to `/chat`.
+4. The client obtains a Clerk session token with `getToken()`.
+5. The token is sent as `Authorization: Bearer <token>` to the API.
+6. Express verifies the request through Clerk middleware.
+7. The authenticated Clerk `userId` scopes documents and conversations.
 
-❌ Unauthenticated requests return `401 Unauthorized`
+❌ Unauthenticated API requests return `401 Unauthorized`.
 
-## 📤 File Upload & Ingestion Flow
+## 📤 File Upload & Processing Flow
 
-1. Authenticated user uploads a PDF
-2. File is temporarily stored in `/uploads`
-3. File metadata is saved in PostgreSQL (`documents` table)
-4. A background job is added to BullMQ
-5. API responds instantly (non-blocking)
+1. An authenticated user selects or drops a PDF.
+2. The client uploads it as multipart field `file`.
+3. The API validates the MIME type, file size, and PDF magic bytes.
+4. The PDF is uploaded to a private Supabase Storage bucket.
+5. A document row is created in PostgreSQL with status `UPLOADED`.
+6. A BullMQ job is added to Redis.
+7. The API returns immediately with `201 Created`.
+8. The client polls the document status endpoint every two seconds.
+9. The UI shows the processing lifecycle:
+
+```
+Uploading
+   ↓
+Uploaded - preparing document
+   ↓
+Creating and storing embeddings
+   ↓
+Ready for questions
+```
+
+The chat input remains disabled until the document reaches `PROCESSED`. Failed processing is surfaced in the workspace with the stored error message.
 
 ## ⚙️ Background Processing (BullMQ + Redis)
 
-- Redis acts as a job broker
-- BullMQ manages asynchronous job execution
-- A dedicated worker processes PDF ingestion
+- Redis acts as the job broker and rate-limit store.
+- BullMQ manages retries and exponential backoff.
+- The API and worker run as separate processes.
+- The worker downloads PDFs from Supabase Storage.
+- Extracted text is split into sentence-aware chunks.
+- Embeddings are generated in batches.
+- Failed jobs update the document to `FAILED` with an error message.
+- Retried jobs clear previous chunks before reprocessing to avoid duplicates.
 
 ### Example Worker Logs
 
 ```
-📄 Started processing documentId
-🧠 Extracted text from PDF
-📦 Stored chunks in database
-🧠 Generated embeddings
-🎉 Document fully processed
+[job 12 | doc ...] started (attempt 1/3)
+[job 12 | doc ...] status set to PROCESSING
+[job 12 | doc ...] PDF downloaded; extracting text
+[job 12 | doc ...] extracted 3733 chars -> 4 chunks
+[job 12 | doc ...] generating embeddings for 4 chunks
+[job 12 | doc ...] embeddings stored successfully
+[job 12 | doc ...] completed successfully; status set to PROCESSED
 ```
 
-✔ Upload API remains fast  
-✔ Heavy processing runs asynchronously
+✔ Upload API remains responsive  
+✔ Heavy processing runs asynchronously  
+✔ Users cannot chat with incomplete embeddings
 
-## 🧠 PDF Processing Pipeline (Phase 3–5)
+## 🧠 PDF Processing & Embeddings
 
-1. PDF is parsed inside a BullMQ worker
-2. Extracted text is split into semantic chunks
-3. Each chunk is stored in `document_chunks`
-4. Gemini generates embeddings for each chunk
-5. Embeddings are stored using pgvector (`vector(768)`)
+1. The worker downloads the PDF from private storage.
+2. `pdf-parse` extracts readable text.
+3. `chunkText` creates overlapping, sentence-aware chunks.
+4. Gemini Embedding 2 generates one 3072-dimensional vector per chunk.
+5. Vectors are stored in the PostgreSQL `vector(3072)` column.
+6. Chat questions use the same embedding model.
+7. PostgreSQL retrieves the most similar chunks using cosine distance.
+
+HNSW is not used because pgvector limits HNSW indexes to 2000 dimensions. The current implementation uses exact vector search, which is appropriate for the current MVP scale but should be revisited as the document corpus grows.
+
+⚠️ Embedding models and vector dimensions must remain compatible. If the embedding model changes, all stored document embeddings must be regenerated and the database column must match the new dimension.
+
+## 💬 Chat & Model Fallback
+
+The chat flow retrieves relevant chunks and sends only those excerpts, the question, and recent conversation history to the generation model.
+
+1. Groq is tried first using the configured chat model.
+2. Groq retries temporary failures up to three times.
+3. Gemini is used when Groq is unavailable or fails.
+4. The answer is constrained to the retrieved document context.
+5. The assistant response is stored in chat history and rendered as Markdown.
+
+Supported citations are numbered context labels such as `[1]` and `[2]`. The prompt explicitly prevents invented page numbers, line numbers, URLs, or unsupported citation formats.
 
 ## 🗄️ Database Schema
 
 ### `documents`
-Stores metadata about uploaded PDFs.
+
+Stores uploaded document metadata and processing state.
 
 - `id`
 - `user_id`
@@ -96,37 +247,249 @@ Stores metadata about uploaded PDFs.
 - `file_name`
 - `file_path`
 - `file_size`
-- `status`
+- `status` (`UPLOADED`, `PROCESSING`, `PROCESSED`, `FAILED`)
+- `error_message`
 - `created_at`
+- `updated_at`
 
 ### `document_chunks`
-Stores chunked text and vector embeddings.
+
+Stores extracted text and vector embeddings.
 
 - `id`
 - `document_id`
 - `chunk_index`
 - `content`
-- `embedding` (pgvector – 768 dimensions)
+- `embedding` (`vector(3072)`)
+- `created_at`
 
-### `chat_history`
-Prepared for Phase 6 (AI chat).
+### `chat_messages`
+
+Stores the conversation for each owned document.
+
+- `id`
+- `document_id`
+- `user_id`
+- `role` (`USER` or `ASSISTANT`)
+- `content`
+- `created_at`
+
+## 🔌 API
+
+Base URL: `/api/v1`. All routes except `/health` require a Clerk bearer token.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/health` | Public readiness probe for PostgreSQL and Redis |
+| GET | `/me` | Returns the authenticated Clerk user ID |
+| POST | `/upload` | Uploads a PDF and queues processing |
+| GET | `/documents` | Lists the authenticated user's documents |
+| GET | `/documents/:id` | Returns status, errors, and chunk/message counts |
+| GET | `/documents/:id/messages` | Returns document chat history |
+| DELETE | `/documents/:id` | Deletes the document, chunks, messages, and stored PDF |
+| POST | `/chat` | Retrieves context and generates a grounded answer |
+
+### Upload
+
+Multipart field:
+
+```text
+file=<PDF file>
+```
+
+Default limit: 20 MB. The API accepts PDF files only and verifies the `%PDF-` file signature.
+
+### Chat
+
+```json
+{
+  "documentId": "document-id",
+  "message": "What does this document say about Docker?"
+}
+```
+
+The document must be `PROCESSED` before chat is available.
+
+## ⚙️ Environment Variables
+
+Create `server/.env` from [server/.env.example](server/.env.example).
+
+```env
+NODE_ENV=development
+PORT=5000
+CLIENT_URL=http://localhost:3000
+
+DATABASE_URL=postgresql://...
+DIRECT_URL=postgresql://...
+
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
+SUPABASE_STORAGE_BUCKET=documents
+
+UPSTASH_REDIS_URL=rediss://...
+
+GEMINI_API_KEY=<api-key>
+GEMINI_EMBEDDING_MODEL=gemini-embedding-2
+GEMINI_CHAT_MODEL=gemini-3.5-flash
+
+GROQ_API_KEY=<api-key>
+GROQ_CHAT_MODEL=llama-3.3-70b-versatile
+
+CLERK_PUBLISHABLE_KEY=pk_...
+CLERK_SECRET_KEY=sk_...
+```
+
+The client requires:
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:5000
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
+CLERK_SECRET_KEY=sk_...
+```
+
+The client appends `/api/v1` to `NEXT_PUBLIC_API_URL`. Keep secret keys out of browser-exposed variables and never commit `.env` files.
+
+## 🛠️ Local Setup
+
+### 1. Install dependencies
+
+```bash
+cd server
+npm install
+
+cd ../client
+npm install
+```
+
+### 2. Configure external services
+
+Create or connect the following services:
+
+- Supabase project with PostgreSQL and a private Storage bucket named `documents`
+- Upstash Redis database
+- Clerk application
+- Google AI Studio API key
+- Groq API key for chat fallback
+
+### 3. Apply database migrations
+
+```bash
+cd server
+npm run db:migrate
+npm run db:generate
+```
+
+### 4. Start the API
+
+```bash
+cd server
+npm run dev
+```
+
+The API runs on `http://localhost:5000`.
+
+### 5. Start the document worker
+
+Use a second terminal:
+
+```bash
+cd server
+npm run dev:worker
+```
+
+### 6. Start the client
+
+Use a third terminal:
+
+```bash
+cd client
+npm run dev
+```
+
+The client runs on `http://localhost:3000`.
+
+## 🚢 Production Deployment
+
+Deploy the client, API, and worker as separate services.
+
+### Client service
+
+```bash
+npm run build
+npm start
+```
+
+Required variables:
+
+```env
+NEXT_PUBLIC_API_URL=https://your-api-domain.com
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_...
+CLERK_SECRET_KEY=sk_live_...
+```
+
+### API service
+
+```bash
+npm run db:migrate
+npm start
+```
+
+Set `CLIENT_URL` to the deployed client origin and configure every server environment variable in the hosting provider. Do not place secrets in source control.
+
+### Worker service
+
+```bash
+npm run start:worker
+```
+
+The API and worker must share the same PostgreSQL, Redis, Supabase, Gemini, Groq, and Clerk configuration.
+
+### Production checklist
+
+- Rotate credentials that were exposed during development.
+- Use production Clerk keys from the same Clerk instance.
+- Configure the production client origin in `CLIENT_URL`.
+- Create the private `documents` Storage bucket.
+- Apply Prisma migrations before accepting traffic.
+- Verify `/api/v1/health` returns `200`.
+- Test upload, processing, chat, deletion, and Groq-to-Gemini fallback.
+- Configure logs and alerts for worker failures.
+- Run dependency and vulnerability audits.
+
+## 🧪 Validation
+
+Client checks:
+
+```bash
+cd client
+npm run lint
+npm run build
+```
+
+Server checks:
+
+```bash
+cd server
+npx prisma validate
+node --check index.js
+node --check src/services/gemini.service.js
+node --check src/workers/documentWorker.js
+```
+
+Automated tests for authentication, ownership isolation, upload validation, worker retries, and the complete upload-to-chat flow are still recommended before production launch.
 
 ## 🛑 Important Notes
 
-- `uploads/` is ignored by Git
-- `.env` is never committed
-- Local file storage is temporary
-- Production setup will use object storage (e.g., S3)
-- Embeddings are generated asynchronously to avoid API blocking
-
-## 🎯 What's Next (Phase 6)
-
-- Embed user queries
-- Perform pgvector similarity search
-- Retrieve top-k relevant chunks
-- Generate grounded answers using Gemini
-- Prevent hallucinations via context-only prompting
+- `.env` files are ignored by Git and must never be committed.
+- Supabase service-role keys are server-only secrets.
+- Clerk publishable keys may be public; Clerk secret keys must remain server-side.
+- Uploaded PDFs are stored in a private Supabase Storage bucket.
+- Every storage path and database query is scoped to the authenticated user.
+- Scanned/image-only PDFs are rejected because they contain no extractable text.
+- The worker must be running for uploaded documents to become chat-ready.
+- A document can be deleted only by its owner.
+- The current 3072-dimensional vector search is exact and may need an indexing strategy at larger scale.
 
 ## 📌 Summary
 
-This backend forms a complete ingestion and vectorization pipeline for a Retrieval-Augmented Generation (RAG) system and is ready for semantic search and AI-powered document chat.
+AskPdf is a complete full-stack RAG application for private PDF question answering. It now includes a public landing experience, Clerk-protected workspace, asynchronous document ingestion, 3072-dimensional Gemini embeddings, PostgreSQL retrieval, Groq-first chat generation with Gemini fallback, and clear processing states from upload through readiness.
