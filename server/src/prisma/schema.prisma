@@ -1,0 +1,75 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [vector]
+}
+
+enum DocumentStatus {
+  UPLOADED
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+}
+
+model Document {
+  id           String         @id @default(uuid())
+  userId       String         @map("user_id")
+  originalName String         @map("original_name")
+  fileName     String         @map("file_name")
+  // Supabase Storage path, e.g. "<userId>/<documentId>.pdf"
+  filePath     String         @map("file_path")
+  fileSize     Int            @map("file_size")
+  status       DocumentStatus @default(UPLOADED)
+  errorMessage String?        @map("error_message")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  chunks   DocumentChunk[]
+  messages ChatMessage[]
+
+  @@index([userId, createdAt])
+  @@map("documents")
+}
+
+model DocumentChunk {
+  id         String                      @id @default(uuid())
+  documentId String                      @map("document_id")
+  chunkIndex Int                         @map("chunk_index")
+  content    String
+  // pgvector column — Prisma Client can't read/write this type directly.
+  // All access to `embedding` goes through prisma.$queryRaw / $executeRaw.
+  // The 3072-dimensional Gemini Embedding 2 vectors use exact vector search;
+  // pgvector HNSW indexes support at most 2000 dimensions.
+  embedding  Unsupported("vector(3072)")?
+  createdAt  DateTime                    @default(now()) @map("created_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@map("document_chunks")
+}
+
+model ChatMessage {
+  id         String   @id @default(uuid())
+  documentId String   @map("document_id")
+  userId     String   @map("user_id")
+  role       ChatRole
+  content    String
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, createdAt])
+  @@map("chat_messages")
+}

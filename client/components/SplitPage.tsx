@@ -1,8 +1,10 @@
 'use client'
 
 import { useState, ChangeEvent, KeyboardEvent } from 'react';
+import { useEffect } from 'react';
 import { Upload, Send, FileText, X, Loader2 } from 'lucide-react';
 import { useAuth } from '@clerk/nextjs';
+import ReactMarkdown from 'react-markdown';
 
 interface Message {
   id: string;
@@ -10,6 +12,8 @@ interface Message {
   sender: 'user' | 'assistant';
   timestamp: Date;
 }
+
+type DocumentStatus = 'UPLOADED' | 'PROCESSING' | 'PROCESSED' | 'FAILED';
 
 export default function SplitPage() {
   const { getToken } = useAuth();
@@ -21,6 +25,48 @@ export default function SplitPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [documentStatus, setDocumentStatus] = useState<DocumentStatus | null>(null);
+
+  useEffect(() => {
+    if (!fileId || documentStatus === 'PROCESSED' || documentStatus === 'FAILED') return;
+
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const pollStatus = async () => {
+      try {
+        const token = await getToken();
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL}/api/v1/documents/${fileId}`,
+          { headers: { ...(token && { Authorization: `Bearer ${token}` }) } },
+        );
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || `Status check failed with status ${response.status}`);
+        }
+
+        if (cancelled) return;
+        setDocumentStatus(data.document.status);
+
+        if (data.document.status !== 'PROCESSED' && data.document.status !== 'FAILED') {
+          timeoutId = setTimeout(pollStatus, 2000);
+        } else if (data.document.status === 'FAILED') {
+          setError(data.document.errorMessage || 'Document processing failed. Please upload it again.');
+        }
+      } catch (err) {
+        if (cancelled) return;
+        console.error('[document] status check failed', err);
+        setError('Could not check document processing status. Please try again.');
+      }
+    };
+
+    pollStatus();
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [documentStatus, fileId, getToken]);
 
   const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -52,13 +98,21 @@ export default function SplitPage() {
   const uploadFile = async (fileToUpload: File) => {
     setIsUploading(true);
     setError(null);
-    
+
     try {
       const token = await getToken();
+      const uploadUrl = `${process.env.NEXT_PUBLIC_API_URL}/api/v1/upload`;
+      console.info('[upload] starting request', {
+        url: uploadUrl,
+        name: fileToUpload.name,
+        size: fileToUpload.size,
+        type: fileToUpload.type,
+        hasToken: Boolean(token),
+      });
       const formData = new FormData();
       formData.append('file', fileToUpload);
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/upload`, {
+      const response = await fetch(uploadUrl, {
         method: 'POST',
         headers: {
           ...(token && { 'Authorization': `Bearer ${token}` }),
@@ -66,15 +120,30 @@ export default function SplitPage() {
         body: formData,
       });
 
-      if (!response.ok) {
-        throw new Error('Upload failed');
+      const responseText = await response.text();
+      let data: { id?: string; fileId?: string; status?: DocumentStatus; error?: string };
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        data = {};
       }
 
-      const data = await response.json();
-      setFileId(data.fileId);
+      console.info('[upload] response received', {
+        status: response.status,
+        ok: response.ok,
+        contentType: response.headers.get('content-type'),
+        body: data.error ?? responseText.slice(0, 500),
+      });
+
+      if (!response.ok) {
+        throw new Error(data.error || `Upload failed with status ${response.status}`);
+      }
+
+      setFileId(data.fileId ?? data.id ?? null);
+      setDocumentStatus(data.status ?? 'UPLOADED');
     } catch (err) {
       setError('Failed to upload file. Please try again.');
-      console.error('Upload error:', err);
+      console.error('[upload] request failed', err);
       setFile(null);
     } finally {
       setIsUploading(false);
@@ -84,9 +153,10 @@ export default function SplitPage() {
   const handleSendMessage = async () => {
     if (!input.trim()) return;
 
+    const messageText = input;
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: input,
+      text: messageText,
       sender: 'user',
       timestamp: new Date(),
     };
@@ -98,15 +168,15 @@ export default function SplitPage() {
 
     try {
       const token = await getToken();
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/chat`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(token && { 'Authorization': `Bearer ${token}` }),
         },
-        body: JSON.stringify({ 
-          message: input,
-          fileId: fileId 
+        body: JSON.stringify({
+          message: messageText,
+          documentId: fileId,
         }),
       });
 
@@ -115,10 +185,10 @@ export default function SplitPage() {
       }
 
       const data = await response.json();
-      
+
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: data.response,
+        text: data.answer,
         sender: 'assistant',
         timestamp: new Date(),
       };
@@ -132,7 +202,7 @@ export default function SplitPage() {
     }
   };
 
-  const handleKeyPress = (e: KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
@@ -142,6 +212,7 @@ export default function SplitPage() {
   const removeFile = () => {
     setFile(null);
     setFileId(null);
+    setDocumentStatus(null);
   };
 
   const formatFileSize = (bytes: number) => {
@@ -151,148 +222,169 @@ export default function SplitPage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-64px)] w-full bg-slate-50">
+    <div className="flex h-[calc(100vh-64px)] w-full bg-zinc-900/50">
       {/* Left Half - Upload Section */}
-      <div className="w-1/2 flex flex-col items-center justify-center p-12 border-r border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100">
-        <div className="max-w-lg w-full">
-          <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-slate-900 mb-2">
-              Upload Document
+      <div className="flex w-1/2 flex-col items-center justify-center border-r border-zinc-800 bg-zinc-900/50 p-12">
+        <div className="w-full max-w-lg">
+          <div className="mb-8">
+            <h2 className="mb-2 text-3xl font-semibold tracking-tight text-zinc-50">
+              Your document
             </h2>
-            <p className="text-slate-600">
-              Share your files to get started
+            <p className="text-zinc-500">
+              Upload a file, then ask questions about it.
             </p>
           </div>
-          
-          <label 
+
+          <label
             htmlFor="file-upload"
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
-            className={`flex flex-col items-center justify-center w-full h-72 border-2 border-dashed rounded-xl cursor-pointer transition-all duration-200 ${
-              isDragging 
-                ? 'border-indigo-500 bg-indigo-50 scale-105' 
-                : 'border-slate-300 bg-white hover:border-indigo-400 hover:bg-slate-50'
-            } ${isUploading ? 'pointer-events-none opacity-50' : ''}`}
+            className={`flex h-72 w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed transition-colors duration-200 ${
+              isDragging
+                ? 'border-zinc-50 bg-zinc-50/5'
+                : 'border-zinc-700 bg-zinc-900 hover:border-zinc-500'
+            } ${isUploading ? 'pointer-events-none opacity-60' : ''}`}
           >
-            <div className="flex flex-col items-center justify-center py-8 px-6">
+            <div className="flex flex-col items-center justify-center px-6 py-8">
               {isUploading ? (
                 <>
-                  <Loader2 className="w-8 h-8 text-indigo-600 animate-spin mb-4" />
-                  <p className="text-base text-slate-700 font-medium">
+                  <Loader2 className="mb-4 h-8 w-8 animate-spin text-zinc-50" />
+                  <p className="text-base font-medium text-zinc-50">
                     Uploading...
                   </p>
                 </>
               ) : (
                 <>
-                  <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 transition-colors ${
-                    isDragging ? 'bg-indigo-100' : 'bg-slate-100'
-                  }`}>
-                    <Upload className={`w-8 h-8 transition-colors ${
-                      isDragging ? 'text-indigo-600' : 'text-slate-400'
-                    }`} />
+                  <div
+                    className={`mb-4 flex h-16 w-16 items-center justify-center rounded-full transition-colors ${
+                      isDragging ? 'bg-zinc-50/10' : 'bg-zinc-800'
+                    }`}
+                  >
+                    <Upload
+                      className={`h-8 w-8 transition-colors ${
+                        isDragging ? 'text-zinc-50' : 'text-zinc-500'
+                      }`}
+                    />
                   </div>
-                  <p className="mb-2 text-base text-slate-700 font-medium">
-                    <span className="text-indigo-600">Click to upload</span> or drag and drop
+                  <p className="mb-2 text-base font-medium text-zinc-50">
+                    <span className="text-zinc-50">Click to upload</span> or drag and drop
                   </p>
-                  <p className="text-sm text-slate-500">
-                    PDF, DOC, TXT, or any file type
+                  <p className="text-sm text-zinc-500">
+                    PDF files only
                   </p>
-                  <p className="text-xs text-slate-400 mt-2">
-                    Maximum file size: 50MB
+                  <p className="mt-2 text-xs text-zinc-600">
+                    Maximum file size: 20MB
                   </p>
                 </>
               )}
             </div>
-            <input 
-              id="file-upload" 
-              type="file" 
-              className="hidden" 
+            <input
+              id="file-upload"
+              type="file"
+              className="hidden"
               onChange={handleFileChange}
               disabled={isUploading}
             />
           </label>
 
           {file && (
-            <div className="mt-6 p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
+            <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
               <div className="flex items-start justify-between">
-                <div className="flex items-start gap-3 flex-1 min-w-0">
-                  <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
-                    <FileText className="w-5 h-5 text-indigo-600" />
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-zinc-800">
+                    <FileText className="h-5 w-5 text-zinc-50" />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-slate-900 truncate">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-zinc-50">
                       {file.name}
                     </p>
-                    <p className="text-xs text-slate-500 mt-1">
+                    <p className="mt-1 text-xs text-zinc-500">
                       {formatFileSize(file.size)}
                     </p>
+                    {documentStatus && (
+                      <p className="mt-2 flex items-center gap-2 text-xs text-zinc-400">
+                        {(documentStatus === 'UPLOADED' || documentStatus === 'PROCESSING') && (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        )}
+                        {documentStatus === 'UPLOADED' && 'Uploaded - preparing document'}
+                        {documentStatus === 'PROCESSING' && 'Creating and storing embeddings'}
+                        {documentStatus === 'PROCESSED' && 'Ready for questions'}
+                        {documentStatus === 'FAILED' && 'Processing failed'}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <button
                   onClick={removeFile}
-                  className="ml-2 p-1 hover:bg-slate-100 rounded-md transition-colors"
+                  aria-label="Remove file"
+                  className="ml-2 rounded-md p-1 transition-colors hover:bg-zinc-800"
                 >
-                  <X className="w-4 h-4 text-slate-400 hover:text-slate-600" />
+                  <X className="h-4 w-4 text-zinc-500 hover:text-zinc-50" />
                 </button>
               </div>
             </div>
           )}
 
           {error && (
-            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-sm text-red-600">{error}</p>
+            <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3">
+              <p className="text-sm text-red-300">{error}</p>
             </div>
           )}
         </div>
       </div>
 
       {/* Right Half - Chat Section */}
-      <div className="w-1/2 bg-white flex flex-col">
-        {/* Messages Display Area */}
+      <div className="flex w-1/2 flex-col bg-zinc-950">
         <div className="flex-1 overflow-y-auto">
           <div className="p-8">
             <div className="mb-6">
-              <h2 className="text-3xl font-bold text-slate-900 mb-1">
+              <h2 className="mb-1 text-3xl font-semibold tracking-tight text-zinc-50">
                 Conversation
               </h2>
-              <p className="text-slate-600">
+              <p className="text-zinc-500">
                 Ask questions about your document
               </p>
             </div>
-            
+
             {messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center mt-32">
-                <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-4">
-                  <Send className="w-7 h-7 text-slate-400" />
+              <div className="mt-32 flex flex-col items-center justify-center">
+                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-zinc-900">
+                  <Send className="h-7 w-7 text-zinc-600" />
                 </div>
-                <p className="text-slate-400 text-center">
+                <p className="text-center text-zinc-500">
                   No messages yet
                 </p>
-                <p className="text-slate-400 text-sm text-center mt-1">
-                  Start typing below to begin the conversation
+                <p className="mt-1 text-center text-sm text-zinc-600">
+                  Upload a document, then type your first question below.
                 </p>
               </div>
             ) : (
               <div className="space-y-4">
                 {messages.map((msg) => (
-                  <div 
+                  <div
                     key={msg.id}
-                    className={`p-4 rounded-xl ${
+                    className={`rounded-xl p-4 ${
                       msg.sender === 'user'
-                        ? 'bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 ml-12'
-                        : 'bg-slate-50 border border-slate-200 mr-12'
+                        ? 'ml-12 border border-zinc-700 bg-zinc-50/5'
+                        : 'mr-12 border border-zinc-800 bg-zinc-900'
                     }`}
                   >
-                    <p className="text-sm font-medium text-slate-600 mb-1">
+                    <p className="mb-1 text-sm font-medium text-zinc-500">
                       {msg.sender === 'user' ? 'You' : 'Assistant'}
                     </p>
-                    <p className="text-slate-800">{msg.text}</p>
+                    {msg.sender === 'assistant' ? (
+                      <div className="space-y-2 text-zinc-300 [&_a]:text-zinc-50 [&_a]:underline [&_code]:rounded [&_code]:bg-zinc-950 [&_code]:px-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:leading-6 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-zinc-950 [&_pre]:p-3 [&_strong]:font-semibold [&_strong]:text-zinc-50 [&_ul]:list-disc [&_ul]:pl-5">
+                        <ReactMarkdown>{msg.text}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap text-zinc-50">{msg.text}</p>
+                    )}
                   </div>
                 ))}
                 {isSending && (
-                  <div className="flex items-center gap-2 text-slate-500 ml-4">
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                  <div className="ml-4 flex items-center gap-2 text-zinc-500">
+                    <Loader2 className="h-4 w-4 animate-spin" />
                     <span className="text-sm">Assistant is thinking...</span>
                   </div>
                 )}
@@ -301,27 +393,27 @@ export default function SplitPage() {
           </div>
         </div>
 
-        {/* Input Area at Bottom */}
-        <div className="border-t border-slate-200 p-6 bg-white shadow-lg">
+        {/* Input Area */}
+        <div className="border-t border-zinc-800 bg-zinc-950 p-6">
           <div className="flex gap-3">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyPress={handleKeyPress}
+              onKeyDown={handleKeyDown}
               placeholder="Type your message..."
-              disabled={isSending}
-              className="flex-1 px-5 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white text-slate-900 placeholder-slate-400 transition-all disabled:opacity-50"
+              disabled={isSending || documentStatus !== 'PROCESSED'}
+              className="flex-1 rounded-xl border border-zinc-700 bg-zinc-900 px-5 py-3 text-zinc-50 placeholder-zinc-500 transition-colors focus:border-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-50/20 disabled:opacity-50"
             />
             <button
               onClick={handleSendMessage}
-              disabled={!input.trim() || isSending}
-              className="px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all flex items-center gap-2 font-medium shadow-sm hover:shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-indigo-600"
+              disabled={!input.trim() || documentStatus !== 'PROCESSED' || isSending}
+              className="flex items-center gap-2 rounded-xl bg-zinc-50 px-6 py-3 font-semibold text-zinc-900 transition-colors hover:bg-zinc-200 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-zinc-50"
             >
               {isSending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Send className="w-4 h-4" />
+                <Send className="h-4 w-4" />
               )}
               Send
             </button>

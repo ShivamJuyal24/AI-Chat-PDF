@@ -1,31 +1,40 @@
-import dotenv from 'dotenv';
-dotenv.config();
+import './src/config/env.js';
+import app from './src/app.js';
+import { env } from './src/config/env.js';
+import { prisma } from './src/config/prisma.js';
+import { redis, bullConnection } from './src/config/redis.js';
+import { documentQueue } from './src/queues/documentQueue.js';
+import { logger } from './src/utils/logger.js';
 
-console.log('DATABASE_URL FROM NODE:', process.env.DATABASE_URL);
+const server = app.listen(env.port, () => {
+  logger.info(`🚀 API server listening on port ${env.port} (${env.nodeEnv})`);
+});
 
-import express from 'express';
-import cors from 'cors';
-import uploadRoutes from './routes/upload.routes.js';
-const app = express();
+server.on('error', (err) => {
+  logger.error('Failed to start HTTP server:', err.message);
+  process.exit(1);
+});
 
-app.use(cors({
-    origin:"*",
+async function shutdown(signal) {
+  logger.info(`${signal} received — shutting down API gracefully...`);
+  try {
+    await new Promise((resolve) => server.close(resolve));
+    await Promise.allSettled([
+      documentQueue.close(),
+      redis.quit(),
+      bullConnection.quit(),
+      prisma.$disconnect(),
+    ]);
+    logger.info('Shutdown complete.');
+    process.exit(0);
+  } catch (err) {
+    logger.error('Error during shutdown:', err.message);
+    process.exit(1);
+  }
+}
 
-}));
-
-app.use(express.json());
-app.use(express.urlencoded({
-     extended: true 
-}));
-
-app.get('/', (req, res)=>{
-    res.send('Hello World');
-})
-
-app.use('/upload', uploadRoutes);
-
-app.listen(8000,()=>{
-    console.log('Server is running on port 8000');
-})
-
-import './workers/documentWorker.js';
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled promise rejection:', reason);
+});

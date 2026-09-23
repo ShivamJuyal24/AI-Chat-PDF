@@ -1,5 +1,9 @@
-import SplitPage from '@/components/SplitPage'
+import { auth } from '@clerk/nextjs/server'
+import { redirect } from 'next/navigation'
+import LandingPage from '@/components/LandingPage'
 
-export default function Home() {
-  return <SplitPage />
+export default async function Home() {
+  const { userId } = await auth()
+  if (userId) redirect('/chat')
+  return <LandingPage />
 }
