@@ -244,7 +244,7 @@ export default function SplitPage() {
               isDragging
                 ? 'border-zinc-50 bg-zinc-50/5'
                 : 'border-zinc-700 bg-zinc-900 hover:border-zinc-500'
-            } ${isUploading ? 'pointer-events-none opacity-60' : ''}`}
+            } ${isUploading || documentStatus === 'PROCESSING' || documentStatus === 'UPLOADED' ? 'pointer-events-none opacity-60' : ''}`}
           >
             <div className="flex flex-col items-center justify-center px-6 py-8">
               {isUploading ? (
@@ -284,7 +284,7 @@ export default function SplitPage() {
               type="file"
               className="hidden"
               onChange={handleFileChange}
-              disabled={isUploading}
+              disabled={isUploading || documentStatus === 'PROCESSING' || documentStatus === 'UPLOADED'}
             />
           </label>
 
