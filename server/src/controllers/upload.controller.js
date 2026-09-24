@@ -4,10 +4,21 @@ import { enqueueDocumentJob } from '../queues/documentQueue.js';
 import { uploadPdf, deletePdf } from '../services/storage.service.js';
 import { ApiError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
+import { timed } from '../utils/timed.js';
 
 const PDF_MAGIC_BYTES = '%PDF-';
 
 export const uploadFile = async (req, res) => {
+  const requestId = req.headers['x-request-id'];
+  const startedAt = process.hrtime.bigint();
+  res.once('finish', () => {
+    logger.info('Timing', {
+      label: 'upload.total',
+      requestId,
+      durationMs: Number((Number(process.hrtime.bigint() - startedAt) / 1_000_000).toFixed(2)),
+      statusCode: res.statusCode,
+    });
+  });
   logger.info('Upload validation started', {
     userId: req.auth?.userId,
     hasFile: Boolean(req.file),
@@ -21,7 +32,9 @@ export const uploadFile = async (req, res) => {
   }
 
   // Trust content, verify bytes: the declared mimetype can be spoofed.
-  if (req.file.buffer.subarray(0, 5).toString('latin1') !== PDF_MAGIC_BYTES) {
+  const magicBytes = req.file.buffer.subarray(0, 5).toString('latin1');
+  logger.info('Timing', { label: 'upload.magic-byte-check', requestId, durationMs: 0 });
+  if (magicBytes !== PDF_MAGIC_BYTES) {
     throw new ApiError(400, 'This file is not a valid PDF.');
   }
 
@@ -30,12 +43,15 @@ export const uploadFile = async (req, res) => {
   const storagePath = `${userId}/${documentId}.pdf`;
 
   logger.info('Uploading PDF to storage', { documentId, storagePath, bytes: req.file.size });
-  await uploadPdf(storagePath, req.file.buffer);
+  await timed('upload.storage', () => uploadPdf(storagePath, req.file.buffer), {
+    requestId,
+    documentId,
+  });
   logger.info('PDF stored successfully', { documentId, storagePath });
 
   try {
     logger.info('Creating document record', { documentId, userId });
-    const document = await prisma.document.create({
+    const document = await timed('upload.document-create', () => prisma.document.create({
       data: {
         id: documentId,
         userId,
@@ -45,11 +61,14 @@ export const uploadFile = async (req, res) => {
         fileSize: req.file.size,
       },
       select: { id: true, status: true, originalName: true, createdAt: true },
-    });
+    }), { requestId, documentId });
 
     try {
       logger.info('Enqueuing document processing job', { documentId, userId });
-      await enqueueDocumentJob({ documentId, userId, storagePath });
+      await timed('upload.queue-add', () => enqueueDocumentJob({ documentId, userId, storagePath }), {
+        requestId,
+        documentId,
+      });
       logger.info('Document processing job queued', { documentId });
     } catch (err) {
       logger.error('Failed to enqueue document job', { documentId, message: err.message, stack: err.stack });

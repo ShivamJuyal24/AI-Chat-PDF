@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
+import { timed } from '../utils/timed.js';
 
 const genAI = new GoogleGenerativeAI(env.geminiApiKey);
 
@@ -16,7 +17,7 @@ async function withRetry(fn, { attempts = 3, baseDelayMs = 1500, label = 'Gemini
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      return await fn();
+      return await timed(`${label}.attempt-${attempt}`, fn, { attempt });
     } catch (error) {
       lastError = error;
       const retryable = RETRYABLE.test(String(error?.message ?? error));
@@ -41,13 +42,13 @@ export async function embedTexts(texts) {
     const batch = texts.slice(i, i + EMBED_BATCH_SIZE);
 
     const result = await withRetry(
-      () =>
+      () => timed('embedding.batch-request', () =>
         embeddingModel.batchEmbedContents({
           requests: batch.map((content) => ({
             model: `models/${env.geminiEmbeddingModel}`,
             content: { parts: [{ text: content }] },
           })),
-        }),
+        })),
       { label: `Embedding batch ${Math.floor(i / EMBED_BATCH_SIZE) + 1}` },
     );
 
@@ -82,7 +83,7 @@ async function generateGroqAnswer({ contents, systemPrompt }) {
     })),
   ];
 
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  const response = await timed('chat.groq.request', () => fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${env.groqApiKey}`,
@@ -94,7 +95,7 @@ async function generateGroqAnswer({ contents, systemPrompt }) {
       temperature: 0.2,
       max_tokens: 2048,
     }),
-  });
+  }), { model: env.groqChatModel });
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -135,12 +136,12 @@ invent page numbers, line numbers, URLs, or any other citation format.`;
 
   const generateGeminiAnswer = async () => {
     const result = await withRetry(
-      () =>
+      () => timed('chat.gemini.request', () =>
         chatModel.generateContent({
           systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
           contents,
           generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
-        }),
+        })),
       { label: `Chat generation fallback (${env.geminiChatModel})` },
     );
 

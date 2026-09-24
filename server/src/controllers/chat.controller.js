@@ -2,10 +2,22 @@ import { prisma } from '../config/prisma.js';
 import { env } from '../config/env.js';
 import { embedTexts, generateAnswer } from '../services/gemini.service.js';
 import { ApiError } from '../utils/errors.js';
+import { timed } from '../utils/timed.js';
+import { logger } from '../utils/logger.js';
 
 const MAX_QUESTION_LENGTH = 4000;
 
 export const chat = async (req, res) => {
+  const requestId = req.headers['x-request-id'];
+  const startedAt = process.hrtime.bigint();
+  res.once('finish', () => {
+    logger.info('Timing', {
+      label: 'chat.total',
+      requestId,
+      durationMs: Number((Number(process.hrtime.bigint() - startedAt) / 1_000_000).toFixed(2)),
+      statusCode: res.statusCode,
+    });
+  });
   const { documentId, message } = req.body ?? {};
 
   if (!documentId || typeof documentId !== 'string') {
@@ -22,10 +34,10 @@ export const chat = async (req, res) => {
 
   // Ownership + readiness check — a not-yet-processed document has no
   // embeddings to retrieve from yet.
-  const document = await prisma.document.findFirst({
+  const document = await timed('chat.document-ownership-check', () => prisma.document.findFirst({
     where: { id: documentId, userId },
     select: { id: true, originalName: true, status: true, errorMessage: true },
-  });
+  }), { requestId, documentId });
   if (!document) throw new ApiError(404, 'Document not found.');
   if (document.status !== 'PROCESSED') {
     throw new ApiError(
@@ -36,46 +48,48 @@ export const chat = async (req, res) => {
     );
   }
 
-  // 1. Embed the question with the same model as the chunks.
-  const [questionVector] = await embedTexts([message.trim()]);
+  // Embedding and history are independent after the ownership check.
+  const [questionVectors, history] = await Promise.all([
+    timed('chat.question-embedding', () => embedTexts([message.trim()]), { requestId, documentId }),
+    timed('chat.history-fetch', () => prisma.chatMessage.findMany({
+      where: { documentId, userId },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      select: { role: true, content: true },
+    }), { requestId, documentId, historyLimit: 10 }),
+  ]);
+  const [questionVector] = questionVectors;
 
   // 2. Retrieve the most similar chunks owned by this document (cosine distance).
-  const chunks = await prisma.$queryRaw`
+  const chunks = await timed('chat.vector-search', () => prisma.$queryRaw`
     SELECT id, content, 1 - (embedding <=> ${questionVector}::vector) AS similarity
     FROM document_chunks
     WHERE document_id = ${documentId} AND embedding IS NOT NULL
     ORDER BY embedding <=> ${questionVector}::vector
     LIMIT ${env.topKChunks}
-  `;
+  `, { requestId, documentId, topK: env.topKChunks });
 
   if (chunks.length === 0) {
     throw new ApiError(503, 'No searchable content is available for this document yet. Please try again shortly.');
   }
 
   // 3. Ground the answer in the retrieved context, with recent conversation history.
-  const history = await prisma.chatMessage.findMany({
-    where: { documentId, userId },
-    orderBy: { createdAt: 'desc' },
-    take: 10,
-    select: { role: true, content: true },
-  });
-
-  const answer = await generateAnswer({
+  const answer = await timed('chat.generation', () => generateAnswer({
     documentTitle: document.originalName,
     question: message.trim(),
     contextChunks: chunks.map((chunk) => chunk.content),
     history: history.reverse(),
-  });
+  }), { requestId, documentId, contextChunkCount: chunks.length });
 
   // 4. Persist the exchange so the conversation survives reloads.
-  const [, assistantMessage] = await prisma.$transaction([
+  const [, assistantMessage] = await timed('chat.message-persistence', () => prisma.$transaction([
     prisma.chatMessage.create({
       data: { documentId, userId, role: 'USER', content: message.trim() },
     }),
     prisma.chatMessage.create({
       data: { documentId, userId, role: 'ASSISTANT', content: answer },
     }),
-  ]);
+  ]), { requestId, documentId });
 
   res.json({
     messageId: assistantMessage.id,

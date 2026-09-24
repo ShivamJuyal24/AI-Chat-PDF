@@ -9,6 +9,7 @@ import { embedTexts } from '../services/gemini.service.js';
 import { chunkText } from '../utils/chunkText.js';
 import { logger } from '../utils/logger.js';
 import { QUEUE_NAME, JOB_NAME } from '../queues/documentQueue.js';
+import { timed } from '../utils/timed.js';
 
 const INSERT_BATCH_SIZE = 200;
 const EMBEDDING_UPDATE_BATCH_SIZE = 200;
@@ -48,17 +49,17 @@ async function processDocument(job) {
   const log = (message) => logger.info(`[job ${job.id} | doc ${documentId}] ${message}`);
 
   log(`started (attempt ${job.attemptsMade + 1}/${job.opts.attempts ?? 1})`);
-  await prisma.document.update({
+  await timed('worker.status-processing', () => prisma.document.update({
     where: { id: documentId },
     data: { status: 'PROCESSING', errorMessage: null },
-  });
+  }), { jobId: job.id, documentId });
   log('status set to PROCESSING');
 
   // 1. Fetch the PDF from Supabase Storage and extract its text.
   log(`downloading PDF from storage: ${storagePath}`);
-  const buffer = await downloadPdf(storagePath);
+  const buffer = await timed('worker.storage-download', () => downloadPdf(storagePath), { jobId: job.id, documentId });
   log(`PDF downloaded (${buffer.length} bytes); extracting text`);
-  const text = await extractPdfText(buffer);
+  const text = await timed('worker.pdf-parse', () => extractPdfText(buffer), { jobId: job.id, documentId });
   log(`text extraction finished (${text.length} characters)`);
 
   if (!text || text.replace(/\s/g, '').length < 20) {
@@ -69,6 +70,7 @@ async function processDocument(job) {
 
   // 2. Chunk the text.
   const chunks = chunkText(text);
+  logger.info('Timing', { label: 'worker.chunking', jobId: job.id, documentId, durationMs: 0, chunkCount: chunks.length });
   if (chunks.length === 0) {
     throw new Error('Chunking produced no chunks from the extracted text.');
   }
@@ -80,9 +82,14 @@ async function processDocument(job) {
   log(`extracted ${text.length} chars -> ${chunks.length} chunks`);
   await job.updateProgress(30);
 
-  // 3. Persist chunks (client-generated ids so we can attach embeddings later).
-  await prisma.documentChunk.deleteMany({ where: { documentId } });
-  log('cleared previous chunks before reprocessing');
+  // 3. Prepare rows once so chunk persistence and embedding can run together.
+  const isRetry = job.attemptsMade > 0;
+  if (isRetry) {
+    await timed('worker.chunk-delete', () => prisma.documentChunk.deleteMany({ where: { documentId } }), { jobId: job.id, documentId });
+    log('cleared previous chunks before retry');
+  } else {
+    log('skipped chunk delete on first attempt');
+  }
   const chunkRows = chunks.map((content, index) => ({
     id: randomUUID(),
     documentId,
@@ -90,28 +97,33 @@ async function processDocument(job) {
     content,
   }));
 
-  log(`persisting ${chunkRows.length} chunks in batches of ${INSERT_BATCH_SIZE}`);
-  for (let i = 0; i < chunkRows.length; i += INSERT_BATCH_SIZE) {
-    await prisma.documentChunk.createMany({
-      data: chunkRows.slice(i, i + INSERT_BATCH_SIZE),
-    });
-    log(`persisted chunks ${i + 1}-${Math.min(i + INSERT_BATCH_SIZE, chunkRows.length)}`);
-  }
-  await job.updateProgress(55);
+  const persistChunks = async () => {
+    log(`persisting ${chunkRows.length} chunks in batches of ${INSERT_BATCH_SIZE}`);
+    for (let i = 0; i < chunkRows.length; i += INSERT_BATCH_SIZE) {
+      await timed('worker.chunk-insert', () => prisma.documentChunk.createMany({
+        data: chunkRows.slice(i, i + INSERT_BATCH_SIZE),
+      }), { jobId: job.id, documentId, batchStart: i, batchSize: Math.min(INSERT_BATCH_SIZE, chunkRows.length - i) });
+      log(`persisted chunks ${i + 1}-${Math.min(i + INSERT_BATCH_SIZE, chunkRows.length)}`);
+    }
+  };
 
-  // 4. Embed in batches and write vectors back in bulk.
-  log(`generating embeddings for ${chunks.length} chunks`);
-  const vectorStrings = await embedTexts(chunks);
+  // Chunk persistence and embedding generation do not depend on each other.
+  log(`generating embeddings and persisting ${chunks.length} chunks concurrently`);
+  const [, vectorStrings] = await Promise.all([
+    persistChunks(),
+    timed('worker.embedding-total', () => embedTexts(chunks), { jobId: job.id, documentId, chunkCount: chunks.length }),
+  ]);
+  await job.updateProgress(55);
   log(`embeddings generated (${vectorStrings.length} vectors); storing vectors`);
   await job.updateProgress(80);
 
-  await storeEmbeddings(chunkRows, vectorStrings);
+  await timed('worker.embedding-store', () => storeEmbeddings(chunkRows, vectorStrings), { jobId: job.id, documentId, vectorCount: vectorStrings.length });
   log('embeddings stored successfully');
 
-  await prisma.document.update({
+  await timed('worker.status-processed', () => prisma.document.update({
     where: { id: documentId },
     data: { status: 'PROCESSED' },
-  });
+  }), { jobId: job.id, documentId });
   await job.updateProgress(100);
 
   log(`completed successfully; status set to PROCESSED (${chunkRows.length} chunks embedded)`);

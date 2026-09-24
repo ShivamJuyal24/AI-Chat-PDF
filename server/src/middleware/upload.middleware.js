@@ -34,7 +34,13 @@ export const logUploadRequest = (req, _res, next) => {
 };
 
 export const uploadPdfFile = (req, res, next) => {
+  const startedAt = process.hrtime.bigint();
   uploadSingle(req, res, (err) => {
+    logger.info('Timing', {
+      label: 'upload.multer.parse',
+      durationMs: Number((Number(process.hrtime.bigint() - startedAt) / 1_000_000).toFixed(2)),
+      requestId: req.headers['x-request-id'],
+    });
     if (err) {
       logger.error('Upload multipart parsing failed', {
         code: err.code,

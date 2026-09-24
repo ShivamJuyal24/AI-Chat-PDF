@@ -6,6 +6,7 @@ import { env } from './config/env.js';
 import { clerkMiddleware } from './config/clerk.js';
 import { apiRouter } from './routes/index.routes.js';
 import { notFoundHandler, errorHandler } from './middleware/error.middleware.js';
+import { logger } from './utils/logger.js';
 
 const app = express();
 
@@ -17,12 +18,21 @@ app.use(
   })
 );
 app.use(morgan(env.isProd ? 'tiny' : 'dev'));
-app.use(
-  clerkMiddleware({
-    publishableKey: env.clerkPublishableKey,
-    secretKey: env.clerkSecretKey,
-  })
-);
+const clerkAuthMiddleware = clerkMiddleware({
+  publishableKey: env.clerkPublishableKey,
+  secretKey: env.clerkSecretKey,
+});
+app.use((req, res, next) => {
+  const startedAt = process.hrtime.bigint();
+  clerkAuthMiddleware(req, res, (err) => {
+    logger.info('Timing', {
+      label: 'auth.clerk',
+      requestId: req.headers['x-request-id'],
+      durationMs: Number((Number(process.hrtime.bigint() - startedAt) / 1_000_000).toFixed(2)),
+    });
+    next(err);
+  });
+});
 app.use(express.json({ limit: '1mb' }));
 
 app.use('/api/v1', apiRouter);
