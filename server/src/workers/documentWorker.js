@@ -13,6 +13,7 @@ import { timed } from '../utils/timed.js';
 
 const INSERT_BATCH_SIZE = 200;
 const EMBEDDING_UPDATE_BATCH_SIZE = 200;
+const WORKER_INSTANCE_KEY = Symbol.for('askpdf.documentWorker');
 
 async function extractPdfText(buffer) {
   const parser = new PDFParse({ data: buffer });
@@ -131,6 +132,10 @@ async function processDocument(job) {
 }
 
 export function startDocumentWorker() {
+  if (globalThis[WORKER_INSTANCE_KEY]) {
+    return globalThis[WORKER_INSTANCE_KEY];
+  }
+
   const documentWorker = new Worker(QUEUE_NAME, processDocument, {
     connection: bullConnection,
     concurrency: env.workerConcurrency,
@@ -179,5 +184,6 @@ export function startDocumentWorker() {
     `🧵 Document worker started on queue "${QUEUE_NAME}" (job: ${JOB_NAME}, concurrency: ${env.workerConcurrency})`
   );
 
+  globalThis[WORKER_INSTANCE_KEY] = documentWorker;
   return documentWorker;
 }
