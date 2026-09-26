@@ -24,3 +24,38 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+
+/* --- Quill theme tokens: paste this into globals.css --- */
+:root {
+  --paper: #FBFAF5;
+  --paper-2: #F2EFE6;
+  --ink: #1C1B18;
+  --muted: #6B6960;
+  --line: #E4E0D3;
+  --wine: #6E2A3D;
+  --wine-dark: #551F30;
+}
+
+.font-display {
+  font-family: var(--font-serif), Georgia, serif;
+}
+
+@keyframes quill-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.quill-marquee { animation: quill-marquee 40s linear infinite; }
+.quill-marquee:hover { animation-play-state: paused; }
+
+@keyframes quill-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.quill-rise { animation: quill-rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.quill-rise-1 { animation-delay: 0.05s; }
+.quill-rise-2 { animation-delay: 0.15s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .quill-marquee, .quill-rise { animation: none; }
+}

@@ -222,15 +222,15 @@ export default function SplitPage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-64px)] w-full bg-zinc-900/50">
+    <div className="flex h-[calc(100vh-64px)] w-full bg-(--paper)">
       {/* Left Half - Upload Section */}
-      <div className="flex w-1/2 flex-col items-center justify-center border-r border-zinc-800 bg-zinc-900/50 p-12">
+      <div className="flex w-1/2 flex-col items-center justify-center border-r border-(--line) bg-(--paper-2) p-12">
         <div className="w-full max-w-lg">
           <div className="mb-8">
-            <h2 className="mb-2 text-3xl font-semibold tracking-tight text-zinc-50">
+            <h2 className="font-display mb-2 text-3xl tracking-tight text-(--ink)">
               Your document
             </h2>
-            <p className="text-zinc-500">
+            <p className="text-(--muted)">
               Upload a file, then ask questions about it.
             </p>
           </div>
@@ -242,15 +242,15 @@ export default function SplitPage() {
             onDrop={handleDrop}
             className={`flex h-72 w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed transition-colors duration-200 ${
               isDragging
-                ? 'border-zinc-50 bg-zinc-50/5'
-                : 'border-zinc-700 bg-zinc-900 hover:border-zinc-500'
+                ? 'border-(--wine) bg-(--wine)/5'
+                : 'border-(--line) bg-(--paper) hover:border-(--muted)'
             } ${isUploading || documentStatus === 'PROCESSING' || documentStatus === 'UPLOADED' ? 'pointer-events-none opacity-60' : ''}`}
           >
             <div className="flex flex-col items-center justify-center px-6 py-8">
               {isUploading ? (
                 <>
-                  <Loader2 className="mb-4 h-8 w-8 animate-spin text-zinc-50" />
-                  <p className="text-base font-medium text-zinc-50">
+                  <Loader2 className="mb-4 h-8 w-8 animate-spin text-(--wine)" />
+                  <p className="text-base font-medium text-(--ink)">
                     Uploading...
                   </p>
                 </>
@@ -258,22 +258,22 @@ export default function SplitPage() {
                 <>
                   <div
                     className={`mb-4 flex h-16 w-16 items-center justify-center rounded-full transition-colors ${
-                      isDragging ? 'bg-zinc-50/10' : 'bg-zinc-800'
+                      isDragging ? 'bg-(--wine)/10' : 'bg-(--paper-2)'
                     }`}
                   >
                     <Upload
                       className={`h-8 w-8 transition-colors ${
-                        isDragging ? 'text-zinc-50' : 'text-zinc-500'
+                        isDragging ? 'text-(--wine)' : 'text-(--muted)'
                       }`}
                     />
                   </div>
-                  <p className="mb-2 text-base font-medium text-zinc-50">
-                    <span className="text-zinc-50">Click to upload</span> or drag and drop
+                  <p className="mb-2 text-base font-medium text-(--ink)">
+                    <span className="text-(--wine)">Click to upload</span> or drag and drop
                   </p>
-                  <p className="text-sm text-zinc-500">
+                  <p className="text-sm text-(--muted)">
                     PDF files only
                   </p>
-                  <p className="mt-2 text-xs text-zinc-600">
+                  <p className="mt-2 text-xs text-(--muted)">
                     Maximum file size: 20MB
                   </p>
                 </>
@@ -289,21 +289,21 @@ export default function SplitPage() {
           </label>
 
           {file && (
-            <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+            <div className="mt-6 rounded-xl border border-(--line) bg-(--paper) p-5">
               <div className="flex items-start justify-between">
                 <div className="flex min-w-0 flex-1 items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-zinc-800">
-                    <FileText className="h-5 w-5 text-zinc-50" />
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-(--paper-2)">
+                    <FileText className="h-5 w-5 text-(--wine)" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-zinc-50">
+                    <p className="truncate text-sm font-semibold text-(--ink)">
                       {file.name}
                     </p>
-                    <p className="mt-1 text-xs text-zinc-500">
+                    <p className="mt-1 text-xs text-(--muted)">
                       {formatFileSize(file.size)}
                     </p>
                     {documentStatus && (
-                      <p className="mt-2 flex items-center gap-2 text-xs text-zinc-400">
+                      <p className="mt-2 flex items-center gap-2 text-xs text-(--muted)">
                         {(documentStatus === 'UPLOADED' || documentStatus === 'PROCESSING') && (
                           <Loader2 className="h-3 w-3 animate-spin" />
                         )}
@@ -318,44 +318,44 @@ export default function SplitPage() {
                 <button
                   onClick={removeFile}
                   aria-label="Remove file"
-                  className="ml-2 rounded-md p-1 transition-colors hover:bg-zinc-800"
+                  className="ml-2 rounded-md p-1 transition-colors hover:bg-(--paper-2)"
                 >
-                  <X className="h-4 w-4 text-zinc-500 hover:text-zinc-50" />
+                  <X className="h-4 w-4 text-(--muted) hover:text-(--ink)" />
                 </button>
               </div>
             </div>
           )}
 
           {error && (
-            <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3">
-              <p className="text-sm text-red-300">{error}</p>
+            <div className="mt-4 rounded-lg border border-(--wine)/30 bg-(--wine)/10 p-3">
+              <p className="text-sm text-(--wine-dark)">{error}</p>
             </div>
           )}
         </div>
       </div>
 
       {/* Right Half - Chat Section */}
-      <div className="flex w-1/2 flex-col bg-zinc-950">
+      <div className="flex w-1/2 flex-col bg-(--paper)">
         <div className="flex-1 overflow-y-auto">
           <div className="p-8">
             <div className="mb-6">
-              <h2 className="mb-1 text-3xl font-semibold tracking-tight text-zinc-50">
+              <h2 className="font-display mb-1 text-3xl tracking-tight text-(--ink)">
                 Conversation
               </h2>
-              <p className="text-zinc-500">
+              <p className="text-(--muted)">
                 Ask questions about your document
               </p>
             </div>
 
             {messages.length === 0 ? (
               <div className="mt-32 flex flex-col items-center justify-center">
-                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-zinc-900">
-                  <Send className="h-7 w-7 text-zinc-600" />
+                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-(--paper-2)">
+                  <Send className="h-7 w-7 text-(--muted)" />
                 </div>
-                <p className="text-center text-zinc-500">
+                <p className="text-center text-(--muted)">
                   No messages yet
                 </p>
-                <p className="mt-1 text-center text-sm text-zinc-600">
+                <p className="mt-1 text-center text-sm text-(--muted)">
                   Upload a document, then type your first question below.
                 </p>
               </div>
@@ -366,26 +366,28 @@ export default function SplitPage() {
                     key={msg.id}
                     className={`rounded-xl p-4 ${
                       msg.sender === 'user'
-                        ? 'ml-12 border border-zinc-700 bg-zinc-50/5'
-                        : 'mr-12 border border-zinc-800 bg-zinc-900'
+                        ? 'ml-12 bg-(--ink)'
+                        : 'mr-12 border border-(--line) bg-(--paper-2)'
                     }`}
                   >
-                    <p className="mb-1 text-sm font-medium text-zinc-500">
-                      {msg.sender === 'user' ? 'You' : 'Assistant'}
+                    <p className={`mb-1 text-sm font-medium ${
+                      msg.sender === 'user' ? 'text-(--paper)/60' : 'text-(--muted)'
+                    }`}>
+                      {msg.sender === 'user' ? 'You' : 'Quill'}
                     </p>
                     {msg.sender === 'assistant' ? (
-                      <div className="space-y-2 text-zinc-300 [&_a]:text-zinc-50 [&_a]:underline [&_code]:rounded [&_code]:bg-zinc-950 [&_code]:px-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:leading-6 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-zinc-950 [&_pre]:p-3 [&_strong]:font-semibold [&_strong]:text-zinc-50 [&_ul]:list-disc [&_ul]:pl-5">
+                      <div className="space-y-2 text-(--ink) [&_a]:text-(--wine) [&_a]:underline [&_code]:rounded [&_code]:bg-(--paper) [&_code]:px-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:leading-6 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-(--paper) [&_pre]:p-3 [&_strong]:font-semibold [&_strong]:text-(--wine) [&_ul]:list-disc [&_ul]:pl-5">
                         <ReactMarkdown>{msg.text}</ReactMarkdown>
                       </div>
                     ) : (
-                      <p className="whitespace-pre-wrap text-zinc-50">{msg.text}</p>
+                      <p className="whitespace-pre-wrap text-(--paper)">{msg.text}</p>
                     )}
                   </div>
                 ))}
                 {isSending && (
-                  <div className="ml-4 flex items-center gap-2 text-zinc-500">
+                  <div className="ml-4 flex items-center gap-2 text-(--muted)">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="text-sm">Assistant is thinking...</span>
+                    <span className="text-sm">Quill is thinking...</span>
                   </div>
                 )}
               </div>
@@ -394,7 +396,7 @@ export default function SplitPage() {
         </div>
 
         {/* Input Area */}
-        <div className="border-t border-zinc-800 bg-zinc-950 p-6">
+        <div className="border-t border-(--line) bg-(--paper) p-6">
           <div className="flex gap-3">
             <input
               type="text"
@@ -403,12 +405,12 @@ export default function SplitPage() {
               onKeyDown={handleKeyDown}
               placeholder="Type your message..."
               disabled={isSending || documentStatus !== 'PROCESSED'}
-              className="flex-1 rounded-xl border border-zinc-700 bg-zinc-900 px-5 py-3 text-zinc-50 placeholder-zinc-500 transition-colors focus:border-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-50/20 disabled:opacity-50"
+              className="flex-1 rounded-xl border border-(--line) bg-(--paper-2) px-5 py-3 text-(--ink) placeholder-(--muted) transition-colors focus:border-(--wine) focus:outline-none focus:ring-2 focus:ring-(--wine)/20 disabled:opacity-50"
             />
             <button
               onClick={handleSendMessage}
               disabled={!input.trim() || documentStatus !== 'PROCESSED' || isSending}
-              className="flex items-center gap-2 rounded-xl bg-zinc-50 px-6 py-3 font-semibold text-zinc-900 transition-colors hover:bg-zinc-200 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-zinc-50"
+              className="flex items-center gap-2 rounded-xl bg-(--wine) px-6 py-3 font-semibold text-(--paper) transition-colors hover:bg-(--wine-dark) active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-(--wine)"
             >
               {isSending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
